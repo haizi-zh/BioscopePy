@@ -1,0 +1,49 @@
+# C/C++
+*.obj
+*.o
+*.d
+*.idb
+*.pdb
+*.vcxproj.user
+*.vcxproj.filters
+*.vcxproj
+*.sln
+*.suo
+Debug/
+Release/
+bin_Win32/
+build/
+bin/
+
+# Java
+*.class
+*.jar
+
+# Python
+*.pyc
+*.pyd
+*.qrc
+
+# Swig
+*_wrap.cxx
+
+# Projects
+.project
+.cproject
+.pydevproject
+
+# Binaries
+*.lib
+*.dll
+*.exe
+
+# Misc
+.metadata/
+*.settings/
+*.swp
+*~
+bioscope-py/zephyre/images
+E7XX_swig/src/*.h
+E7XX_swig/src/*.py
+FireGrab_swig/src/*.h
+FireGrab_swig/src/*.py
