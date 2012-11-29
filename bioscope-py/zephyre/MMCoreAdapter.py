@@ -14,11 +14,11 @@ class PiezoStageError(Exception):
     '''
     General piezo stage error
     '''
-    def __init__(self, errId= -1, errMsg=''):
-        self.errId, self.errMsg = errId, errMsg
+    def __init__(self, errId= -1, errMsg='', cause=None):
+        self.errId, self.errMsg, self.cause = errId, errMsg, cause
         
     def __str__(self):
-        return 'Error id: %d, message: %s' % (self.errId, self.errMsg)
+        return 'Error id: %d, message: %s, cause: %s' % (self.errId, self.errMsg, self.cause)
     
 class PiezoStage(object):
     '''
@@ -31,33 +31,20 @@ class PiezoStage(object):
     def __init__(self):
         self.__isConnected = False
         self.__typeSize = {'?':1, 'c':1, 'h':2, 'H':2, 'i':4, 'I':4, 'f':4, 'd':8}
+        self.address = '127.0.0.1'
+        self.port = 50501
 
-    def connect(self, address='127.0.0.1', port=5050):
+    def connect(self, boardId=None, reboot=False):
         if self.__isConnected:
             return
         
-        self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.__address, self.__port = address, port
-        self.__socket.connect((self.__address, self.__port))
-        self.__isConnected = True
+        try:
+            self.__socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            self.__socket.connect((self.address, self.port))
+            self.__isConnected = True
+        except socket.error as e:
+            raise PiezoStageError(cause=e)
         
-#        self.__socket.sendall('abcdefg')
-        
-#    @property
-#    def axisNames(self):
-#        return self.__axisNames
-#    @axisNames.setter
-#    def axisNames(self, value):
-#        if len(value) != len(self.__axisNames):
-#            raise PiezoStageError(errMsg='Invalid names.')
-#        self.configStatuses = (True,) * len(self.__axisNames)
-#        ret = es.E7XX_SAI(self.__devId, self.__axisNames, value)
-#        if ret == 0:
-#            self.__raiseLastError()
-#        ret, self.__axisNames = es.E7XX_qSAI_ALL(self.__devId, 512)
-#        if ret == 0:
-#            self.__raiseLastError()
-    
     @property
     def numTotalAxes(self):
         '''
@@ -270,7 +257,11 @@ class PiezoStage(object):
         Receive data from the socket.
         return: (cmd, (para1, para2, ...))
         '''
-        data = self.__socket.recv(4)
+        try:
+            data = self.__socket.recv(4)
+        except socket.error as e:
+            raise PiezoStageError(cause=e)
+        
         startFlag, frameLen = unpack('>HH', data)
         if startFlag != PiezoStage.START_FLAG:
             raise PiezoStageError(-1, 'Connection error.')
@@ -299,7 +290,10 @@ class PiezoStage(object):
             
         data = self.__attachMD5(data)
         print(data)
-        self.__socket.sendall(data)
+        try:
+            self.__socket.sendall(data)
+        except socket.error as e:
+            raise PiezoStageError(cause=e)        
         
     def __extractParameters(self, data, num):
         '''
@@ -382,6 +376,7 @@ class PiezoStage(object):
     def disconnect(self):
         if not self.__isConnected:
             return
+        self.__socket.shutdown(socket.SHUT_RDWR)
         self.__socket.close()
         
     @property

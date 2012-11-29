@@ -10,7 +10,7 @@ from PyQt4.QtGui import *
 from matplotlib.backends.backend_qt4agg import FigureCanvasQTAgg as FigureCanvas
 from matplotlib.backends.backend_qt4agg import NavigationToolbar2QTAgg as NavigationToolbar
 from matplotlib.figure import Figure
-import zephyre.MMCoreAdapter as es
+import E7XX as es
 import AVTCamera as avt
 import BioscopeRc
 import Queue
@@ -846,12 +846,19 @@ class BioScopeCore(QObject):
         self.__pipeline.setThreshold(threshold)
         
     def initStage(self):
-        self.__stage = es.PiezoStage(1)
+        stagePref = self.pref['PiezoStage']
+        if stagePref['Controller'] == 'Local':
+            self.__stage = es.PiezoStage(stagePref['BoardId'])
+        elif stagePref['Controller'] == 'Remote':
+            self.__stage = es.PiezoStageAdapter()
+            self.__stage.address = stagePref['IP']
+            self.__stage.port = stagePref['MonitorPort']
+            
         try:
-            self.__stage.connect(1, False)
+            self.__stage.connect()
         except es.PiezoStageError:
             try:
-                self.__stage.connect(1, False)
+                self.__stage.connect()
             except es.PiezoStageError as e:
                 QMessageBox(QMessageBox.Warning, 'Error', 'Unable to initialize the piezo stage:\n%s' % e,
                                 QMessageBox.Ok).exec_()
@@ -930,10 +937,11 @@ class BioScopeCore(QObject):
             
             # PiezoStage
             stagePref = {}
-            stagePref['Controller'] = 'Remote'
+            stagePref['Controller'] = 'Local'
             stagePref['IP'] = '127.0.0.1'
             stagePref['MonitorPort'] = 8182
             stagePref['CommPort'] = 8183
+            stagePref['BoardId'] = 1
             self.pref['PiezoStage'] = stagePref
             
             # Analyzer
@@ -1114,7 +1122,7 @@ class BioScopeCore(QObject):
                 for i in xrange(self.__frameCount):
                     if self.__stopFlag:
                         break
-                    logging.debug('#%d' % i)
+#                    logging.debug('#%d' % i)
                     try:
                         self.__retrieve(i == 0)
                     except Queue.Empty:
@@ -2942,11 +2950,6 @@ class BioScopeView(QGraphicsView):
     
 def main(argv):
     app = QApplication(argv)
-    
-    if len(argv) > 1 and argv[1]=='lan':
-        import MMCoreAdapter as es
-    else:
-        import E7XX as es
     
     login = LoginDialog()
     if login.exec_() == QDialog.Rejected:
