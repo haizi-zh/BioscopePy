@@ -412,11 +412,7 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qDFH, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qDFH:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qDFH, ())
     
     def setHome(self, axis=None):
         '''
@@ -444,11 +440,8 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qPOS, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qPOS:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qPOS, ())
+
     @position.setter
     def position(self, value):
         '''
@@ -470,11 +463,7 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qCST, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qCST:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qCST, ())
     
     @configStatuses.setter
     def configStatuses(self, data):
@@ -486,24 +475,6 @@ class PiezoStageAdapter(object):
         
         self.__sendData(PiezoStageAdapter.CST, self.__paramsBuilder(data, '?'))
         
-    def __dataOutput(self, arrayFunc, stageFunc, axis=None):
-        '''
-        General call form: BOOL ret = stageFuncQ(id, arrayFunc, stageFunc, axisIndice) => (length, array)
-        For querying functions
-        arrayFunc: ('Init':init, 'Getter':getter)
-        '''
-        numAxes = len(self.__axisNames if axis is None else axis)
-        axisNames = ''.join(self.__axisNames[i - 1]\
-                            for i in (xrange(1, len(self.__axisNames) + 1) if axis is None else axis))
-        arrayInit = arrayFunc['Init']
-        arrayGetter = arrayFunc['Getter']
-        valArray = arrayInit(numAxes)
-        ret = stageFunc(self.__devId, axisNames, valArray)
-        if ret == 0:
-            self.__raiseLastError()
-        return tuple(arrayGetter(valArray, i) for i in xrange(numAxes))
-    
-    
     def __controlParams(self, value):
         '''
         value: (1,2,3) or None
@@ -539,60 +510,6 @@ class PiezoStageAdapter(object):
             params.append((ptype, self.__typeSize[ptype], data[k]))
         return tuple(params)
         
-    def __dataInput(self, arrayFunc, stageFunc, data):
-        '''        
-        For setting functions
-        Usage: __dataInput(arrayFunc, stageFunc, {1:2,2:3})
-               __dataInput(arrayFunc, stageFunc, (3,5))
-        arrayFunc: ('Init':init, 'Setter':setter) 
-        '''
-        try:
-            # dictionary usage
-            indice = data.keys()
-            numAxes = len(indice)
-            axisNames = ''.join(self.__axisNames[i - 1] for i in indice)
-            arrayInit = arrayFunc['Init']
-            arraySetter = arrayFunc['Setter']
-            valArray = arrayInit(numAxes)
-            
-            map(lambda i : arraySetter(valArray, i, data[indice[i]]),
-                xrange(numAxes))
-            ret = stageFunc(self.__devId, axisNames, valArray)
-            if ret == 0:
-                self.__raiseLastError()
-        except AttributeError:
-            # list usage
-            numAxes = len(data)
-            axisNames = ''.join(self.__axisNames[i] for i in xrange(numAxes))
-            arrayInit = arrayFunc['Init']
-            arraySetter = arrayFunc['Setter']
-            valArray = arrayInit(numAxes)
-            map(lambda i : arraySetter(valArray, i, data[i]), xrange(numAxes))
-            ret = stageFunc(self.__devId, axisNames, valArray)
-            if ret == 0:
-                self.__raiseLastError()
-                
-    def __control(self, stageFunc, axis):
-        '''
-        General form for controlling functions. axis: (1,2,3) or None
-        '''
-        axisNames = ''.join(self.__axisNames[i - 1] for i in \
-                            (axis if axis is not None else xrange(1, len(self.__axisNames) + 1)))
-        ret = stageFunc(self.__devId, axisNames)
-        if ret == 0:
-            self.__raiseLastError()
-            
-    def waitForAxis(self, axis=None):
-        '''
-        Wait for the specified axis to stop
-        '''
-        getStatus = lambda : tuple((self.isOnTarget)[i - 1] for i in \
-                       (axis if axis is not None else xrange(self.numTotalAxes)))
-        s = getStatus()
-        while not reduce(lambda x, y: x and y, s):
-            time.sleep(0.001)
-            s = getStatus()
-            
     def __attachMD5(self, data):
         m = md5(data)
         return data + m.digest()
@@ -626,7 +543,11 @@ class PiezoStageAdapter(object):
         # 0xff 0xfe [length] [cmd] [numPara] [p1] [p2] ... [pn] [md5]
         cmd, numPara = tuple(ord(c) for c in unpack('>cc', data[4:6]))
         paras = self.__extractParameters(data[6:], numPara)
-        return (cmd, paras)
+        if not paras[0]:
+            # Some error occured
+            raise PiezoStageError(errMsg=paras[1])
+        # Returning the remaining values
+        return (cmd, paras[1:])
     
     def __sendData(self, cmd, paras):
         '''
@@ -645,7 +566,12 @@ class PiezoStageAdapter(object):
         try:
             self.__socket.sendall(data)
         except socket.error as e:
-            raise PiezoStageError(cause=e)        
+            raise PiezoStageError(cause=e)
+        
+        cmdRet, params = self.__recvData()
+        if cmdRet != cmd:
+            raise PiezoStageError()
+        return params
         
     def __extractParameters(self, data, num):
         '''
@@ -656,9 +582,13 @@ class PiezoStageAdapter(object):
         offset = 0
         para = [None, ] * num
         for i in xrange(num):
-            hdr = unpack('>cH', data[offset + 1:offset + 4])
-            plen = hdr[1]
-            pdata = unpack('>' + hdr[0], data[offset + 4:offset + 4 + plen])
+            # hdr: [para type] [para len]
+            ptype, plen = unpack('>cH', data[offset + 1:offset + 4])
+            if ptype == 's':
+                # string
+                pdata = (data[offset + 4:offset + 4 + plen],)                
+            else:
+                pdata = unpack('>' + ptype, data[offset + 4:offset + 4 + plen])
             para[i] = pdata[0]
             offset += 4 + plen
         return tuple(para)
@@ -671,11 +601,7 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qSVO, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qSVO:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qSVO, ())
     
     @svoStatus.setter
     def svoStatus(self, value):
@@ -684,7 +610,6 @@ class PiezoStageAdapter(object):
         '''
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
-        
         self.__sendData(PiezoStageAdapter.SVO, self.__paramsBuilder(value, '?'))
         
     @property
@@ -695,11 +620,7 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qONT, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qONT:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qONT, ())
     
     @property
     def openLoopValue(self):
@@ -709,11 +630,8 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qSVA, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qSVA:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qSVA, ())
+    
     @openLoopValue.setter
     def openLoopValue(self, value):
         '''
@@ -723,7 +641,6 @@ class PiezoStageAdapter(object):
             raise PiezoStageError(-1, 'Not connected.')
         
         self.__sendData(PiezoStageAdapter.SVA, self.__paramsBuilder(value, 'd'))
-
         
     def disconnect(self):
         if not self.__isConnected:
@@ -763,11 +680,7 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qPLM, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qPLM:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qPLM, ())
     @upperLimit.setter
     def upperLimit(self, value):
         '''
@@ -786,11 +699,7 @@ class PiezoStageAdapter(object):
         if not self.__isConnected:
             raise PiezoStageError(-1, 'Not connected.')
         
-        self.__sendData(PiezoStageAdapter.qNLM, ())
-        cmd, params = self.__recvData()
-        if cmd != PiezoStageAdapter.qNLM:
-            raise PiezoStageError()
-        return params
+        return self.__sendData(PiezoStageAdapter.qNLM, ())
     @lowerLimit.setter
     def lowerLimit(self, value):
         '''
