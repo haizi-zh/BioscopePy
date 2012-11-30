@@ -957,6 +957,7 @@ class BioScopeCore(QObject):
             anaPref['PersistenceLength'] = 50
             anaPref['kBT'] = 4.2
             anaPref['DNALength'] = 16700
+            anaPref['PulseDelta'] = 1
             self.pref['Analyzer'] = anaPref
             
             # Calibration
@@ -1236,6 +1237,14 @@ class BioScopeCore(QObject):
         with QWriteLocker(self.__stageLock):
             try:
                 self.__stage.openLoopValue = value
+            except es.PiezoStageError as err:
+                self.message(str(err))
+                
+    def pulseOpenLoop(self, delta):
+        with QWriteLocker(self.__stageLock):
+            try:
+                original = self.__stage.openLoopValue
+                self.__stage.openLoopValue = tuple(delta[i] + original[i] for i in xrange(3))
             except es.PiezoStageError as err:
                 self.message(str(err))
             
@@ -1866,6 +1875,29 @@ class AnalysisDockWidget(QWidget):
         
         self.setLayout(layout)
         
+class PulseDialog(QDialog):
+    def __init__(self, parent=None):
+        super(PulseDialog, self).__init__(parent)
+        
+        mainLayout = QHBoxLayout()
+        delta = BioScopeCore.getInstance().pref['Analyzer']['PulseDelta']
+        self.edtDelta = QLineEdit('%.3f' % delta)
+        labelDelta = QLabel("Delta")
+        btnOk = QPushButton('OK')
+        btnOk.clicked.connect(self.accept)
+        btnCancel = QPushButton('Cancel')
+        btnCancel.clicked.connect(self.reject)
+        
+        mainLayout.addWidget(labelDelta)
+        mainLayout.addWidget(self.edtDelta)
+        mainLayout.addWidget(btnOk)
+        self.setLayout(mainLayout)
+        
+    def accept(self):
+        val = int(self.edtDelta.text())
+        BioScopeCore.getInstance().pref['Analyzer']['PulseDelta'] = val
+        BioScopeCore.getInstance().pulseOpenLoop((val,) * 3)
+                
 class PrefDialog(QDialog):
     '''
     Preferences dialog
@@ -2217,6 +2249,8 @@ class BioScopeMainWindow(QMainWindow):
             analysisMenu.addSeparator()
             self.dataRecorder = self.__createAction('Record &Data', self.toggleDataRecorder, checkable=True)
             analysisMenu.addAction(self.dataRecorder)
+            self.applyPulseAction = self.__createAction('Apply Pulse', self.applyPulse)
+            analysisMenu.addAction(self.applyPulseAction)
             analysisMenu.aboutToShow.connect(self.onShowAnalysisMenu)
 
         # Dock widget
@@ -2266,6 +2300,13 @@ class BioScopeMainWindow(QMainWindow):
         self.lastUpdate = 0
         
         self.setWindowState(Qt.WindowMaximized)
+        
+    def applyPulse(self):
+        '''
+        Shwo the pulse setting dialog
+        '''
+        dlg = PulseDialog()
+        dlg.exec_()
         
     def toggleDataRecorder(self):
         # Is the data location reachable?
