@@ -835,14 +835,24 @@ if __name__ == '__main__':
     pi.svoStatus = (True,) * 3
     
     print(pi.position)
+    
+    pi.position = {3:8}
+    print(pi.position)
+    
     pi.position = (2.5, 5.5)
+    print(pi.position)
+    
     pi.position = {3:4.8, 2:2.2}
+    print(pi.position)
+    
     pi.position = {1:20, 2:40, 3:7.2}
     print(pi.position)
     
     print(pi.svoStatus)
     pi.svoStatus = (True, False)
+    print(pi.svoStatus)
     pi.svoStatus = {3:False, 1:True}
+    print(pi.svoStatus)
     pi.svoStatus = (False,) * 3
     print(pi.svoStatus)
     

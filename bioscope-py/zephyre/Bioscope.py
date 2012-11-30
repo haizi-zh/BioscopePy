@@ -1388,7 +1388,7 @@ class BioScopeCore(QObject):
                 px = np.polyfit(ovx, crdx, 1)
                 py = np.polyfit(ovy, crdy, 1)
                 pz = np.polyfit(ovz, scorz, 1)
-                core.setRoiPid(roiId, pTerm=tuple(map(lambda v:0.3 / v[0], (px, py, pz))))
+                core.setRoiPid(roiId, pTerm=tuple(map(lambda v:0.1 / v[0], (px, py, pz))))
                 px = np.polyfit(posx, crdx, 1)
                 py = np.polyfit(posy, crdy, 1)
                 pz = np.polyfit(posz, scorz, 2)
@@ -1622,6 +1622,15 @@ class ImagePipeline(QObject):
         imageData['RawData'] = numpy.array(imageData['NumArray'], dtype=numpy.uint8).tostring()
         return imageData
     
+    def updateIValue(self, posDelta):
+        popValue = (0,) * 3
+        if self.__iValueCnt > self.__iValQueueSize - 1:
+            popValue = self.__iValQueue.get()
+            self.__iValueCnt -= 1
+        self.__iValQueue.put(posDelta)
+        self.__iValueCnt += 1
+        self.iClampValue = tuple(map(lambda i:self.iClampValue[i] + posDelta[i] - popValue[i], xrange(3)))
+    
     def startClamp(self, roiId):
         '''
         Run for the first time when clamping is started. Get the initial positions of X/Y/Z
@@ -1629,6 +1638,12 @@ class ImagePipeline(QObject):
         self.isClamping = True
         self.clampRoiId = roiId
         self.clampOrigin = None
+        
+        # Store the i-values
+        self.__iValQueue = Queue.Queue()
+        self.__iValueCnt = 0
+        self.__iValQueueSize = 100
+        
         if not self.isRecording:
             # start the recorder
             self.startByClamp = True
@@ -1646,6 +1661,14 @@ class ImagePipeline(QObject):
             self.isRecording = False
         
     def recordData(self, imageData):
+        '''
+        Record format:
+        X/Y/Z_Pix: coordinates (pixel)
+        X/Y/Z_Phys: physical coordinates(um), zero if the system hasn't been calibrated.
+        X/Y/Z_Pos: PI-E761 positions(um)
+        X/Y/Z_Value: PI-E761 open-loop values
+        
+        '''
         if not self.isRecording:
             return imageData
         gosseResult = imageData['GosseResult']
@@ -1810,13 +1833,16 @@ class ImagePipeline(QObject):
                 pTerm = pid['P-Term']
                 iTerm = pid['I-Term']
                 delta = tuple(map(lambda i:pos[i] - self.clampOrigin[i], xrange(3)))
-                self.iClampValue = tuple(map(lambda i:self.iClampValue[i] + delta[i], xrange(3)))
+                self.updateIValue(delta)
+#                self.iClampValue = tuple(map(lambda i:self.iClampValue[i] + delta[i], xrange(3)))
                 def func(i):
                     d = -delta[i] * pTerm[i] - self.iClampValue[i] * iTerm[i]
                     m = vco[i] * dt
                     d = d if abs(d) <= m else m if d > 0 else -m
                     return self.stageOv[i] + d
                 self.targetOv = tuple(map(func, xrange(3)))
+#                logging.debug('delta: %f, iValue: %f, openVal: %f, targetVal: %f' % \
+#                              (delta[2], self.iClampValue[2], self.stageOv[2], self.targetOv[2]))
                 core.setOpenLoopValue(self.targetOv)
             break
         return imageData
