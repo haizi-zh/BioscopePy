@@ -1244,7 +1244,10 @@ class BioScopeCore(QObject):
         with QWriteLocker(self.__stageLock):
             try:
                 original = self.__stage.openLoopValue
-                self.__stage.openLoopValue = tuple(delta[i] + original[i] for i in xrange(3))
+                logging.debug(str(original))
+                val = tuple(delta[i] + original[i] for i in xrange(3))
+                logging.debug(str(val))
+                self.__stage.openLoopValue = val 
             except es.PiezoStageError as err:
                 self.message(str(err))
             
@@ -1653,6 +1656,11 @@ class ImagePipeline(QObject):
         self.__iValueCnt = 0
         self.__iValQueueSize = 100
         
+        # low-pass filter
+        self.__lowPass = Queue.Queue()
+        self.__lowPassCnt = 0
+        self.__lowPassSize = 50
+        
         if not self.isRecording:
             # start the recorder
             self.startByClamp = True
@@ -1834,15 +1842,29 @@ class ImagePipeline(QObject):
             self.stageOv = core.openLoopValue()        
             if self.clampOrigin is None:
                 # This is the first time during a feedback
-                self.iClampValue = (0, 0, 0)
+                self.iClampValue = (0,) * 3
+                self.__lowPassDelta = (0,) * 3
                 self.clampOrigin = pos
                 self.targetOv = self.stageOv
             else:
                 pid = core.getRoiPid(roiId)
                 pTerm = pid['P-Term']
                 iTerm = pid['I-Term']
+                
                 delta = tuple(map(lambda i:pos[i] - self.clampOrigin[i], xrange(3)))
                 self.updateIValue(delta)
+                
+                # low pass filter for p-Terms
+                popValue = (0,) * 3
+                if self.__lowPassCnt >= self.__lowPassSize - 1:
+                    popValue = self.__lowPass.get()
+                    self.__lowPassCnt -= 1
+                self.__lowPass.put(delta)
+                self.__lowPassCnt += 1
+                self.__lowPassDelta = tuple(self.__lowPassDelta[i] + delta[i] - popValue[i] for i in xrange(3))
+                
+                delta = tuple(delta[i] / self.__lowPassCnt for i in xrange(3))                            
+                
 #                self.iClampValue = tuple(map(lambda i:self.iClampValue[i] + delta[i], xrange(3)))
                 def func(i):
                     d = -delta[i] * pTerm[i] - self.iClampValue[i] * iTerm[i]
@@ -1917,12 +1939,21 @@ class PulseDialog(QDialog):
         mainLayout.addWidget(labelDelta)
         mainLayout.addWidget(self.edtDelta)
         mainLayout.addWidget(btnOk)
+        mainLayout.addWidget(btnCancel)
         self.setLayout(mainLayout)
         
     def accept(self):
-        val = int(self.edtDelta.text())
-        BioScopeCore.getInstance().pref['Analyzer']['PulseDelta'] = val
-        BioScopeCore.getInstance().pulseOpenLoop((val,) * 3)
+        core = BioScopeCore.getInstance()
+        val = float(self.edtDelta.text())
+        core.pref['Analyzer']['PulseDelta'] = val
+        
+        try:
+            originalSVO = core.svoStatus()
+            core.setSvoStatus((False,) * 3) 
+            core.pulseOpenLoop((val,) * 3)
+            core.setSvoStatus(originalSVO)
+        except es.PiezoStageError as err:
+            core.message(str(err))
                 
 class PrefDialog(QDialog):
     '''
