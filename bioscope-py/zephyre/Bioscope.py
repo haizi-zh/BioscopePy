@@ -969,6 +969,7 @@ class BioScopeCore(QObject):
             calibrPref['I-Term'] = (0,) * 3
             calibrPref['D-Term'] = (0,) * 3
             calibrPref['Velocity'] = (0.2, 0.2, 1)
+            calibrPref['PTermLowPass'] = 5
             self.pref['Calibration'] = calibrPref
             
             # Geometry
@@ -1659,7 +1660,7 @@ class ImagePipeline(QObject):
         # low-pass filter
         self.__lowPass = Queue.Queue()
         self.__lowPassCnt = 0
-        self.__lowPassSize = 50
+        self.__lowPassSize = BioScopeCore.getInstance()['Calibration']['PTermLowPass']
         
         if not self.isRecording:
             # start the recorder
@@ -1986,6 +1987,7 @@ class PrefDialog(QDialog):
                                         (self.edtITermX, self.edtITermY, self.edtITermZ)))
             calPref['Velocity'] = tuple(map(lambda v:float(v.text()),
                                         (self.edtVcoX, self.edtVcoY, self.edtVcoZ)))
+            calPref['PTermLowPass'] = int(self.__edtPTermLowPass.text())
         except ValueError:
             pref['Calibration'] = bkp
             
@@ -2016,13 +2018,14 @@ class PrefDialog(QDialog):
         core = BioScopeCore.getInstance()
         calibrPref = core.pref['Calibration']
         steps = calibrPref['StepCount']
+        pLowPass = calibrPref['PTermLowPass']
         lower = calibrPref['LowerEnd']
         upper = calibrPref['UpperEnd']
         iTerm = calibrPref['I-Term']
         vco = calibrPref['Velocity']
         gridLayout = QGridLayout()
         self.__edtSteps = QLineEdit('%d' % steps)
-        gridLayout.addWidget(QLabel('# of steps:'), 0, 0)
+        gridLayout.addWidget(QLabel('# of steps:'), 0, 0, Qt.AlignRight)
         gridLayout.addWidget(self.__edtSteps, 0, 1)
         self.__edtXStart = QLineEdit('%.4f' % lower[0])
         self.__edtXEnd = QLineEdit('%.4f' % upper[0])
@@ -2055,6 +2058,10 @@ class PrefDialog(QDialog):
         map(lambda w:vcoLayout.addWidget(w),
             (self.edtVcoX, self.edtVcoY, self.edtVcoZ))
         gridLayout.addLayout(vcoLayout, 5, 1, 1, 3)
+        
+        self.__edtPTermLowPass = QLineEdit('%d' % pLowPass)
+        gridLayout.addWidget(QLabel('Low-pass filter:'), 6, 0, Qt.AlignRight)
+        gridLayout.addWidget(self.__edtPTermLowPass, 6, 1)
         
         calibrGroup.setLayout(gridLayout)
         self.mainLayout.addWidget(calibrGroup)
